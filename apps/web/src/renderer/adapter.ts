@@ -1,6 +1,27 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { GraphEdge, GraphNode, GraphView, SemanticZoomLevel } from "@codinflow/graph-schema";
-import { containingFileId, layoutGraph } from "./layout";
+import { CHILD_HEIGHT, NODE_HEIGHT, containingFileId, layoutGraph } from "./layout";
+
+/** One outgoing call a function makes, rendered as a readable row on its card. */
+export interface CallInfo {
+  id: string;
+  name: string;
+  /** Prose guard for a conditional call, e.g. "if is audio". */
+  guard?: string;
+  conditional: boolean;
+}
+
+/** Kinds whose cards list the calls they make. */
+const CALLERS = new Set(["function", "method"]);
+const CALL_ROW_H = 20;
+const CALLS_PAD = 10;
+const MAX_INLINE_CALLS = 4;
+
+/** Extra card height for a function's inline call list. */
+function callAreaHeight(count: number): number {
+  if (count === 0) return 0;
+  return CALLS_PAD + Math.min(count, MAX_INLINE_CALLS) * CALL_ROW_H + (count > MAX_INLINE_CALLS ? CALL_ROW_H : 0);
+}
 
 /**
  * Renderer adapter (AST-and-CANVAS decision).
@@ -30,6 +51,7 @@ export interface RenderableGraph {
 
 export interface CodeNodeData extends Record<string, unknown> {
   graphNode: GraphNode;
+  calls: CallInfo[];
   changeState?: ChangeState;
   /** Change states of the symbols inside a file, summarized on its header. */
   childChanges?: { added: number; changed: number; removed: number };
@@ -41,10 +63,35 @@ export interface CodeNodeData extends Record<string, unknown> {
 
 export const reactFlowAdapter: GraphRendererAdapter = {
   async createView(input, options) {
-    const { positions, sizes } = await layoutGraph(input, options.direction ?? "RIGHT", options.savedPositions);
-
     const containerIds = new Set(input.nodes.filter((node) => node.kind === "file").map((node) => node.id));
     const byId = new Map(input.nodes.map((node) => [node.id, node]));
+
+    // What each function calls, from the graph's own call/await edges. Conditional
+    // edges already carry a prose guard ("if is audio") and the exact condition.
+    const callsByNode = new Map<string, CallInfo[]>();
+    for (const edge of input.edges) {
+      if (edge.kind !== "calls" && edge.kind !== "awaits") continue;
+      const target = byId.get(edge.targetNodeId);
+      // Only real function calls read as "name()". External services and data
+      // stores are surfaced by the card's description and the inspector instead.
+      if (!target || !CALLERS.has(target.kind)) continue;
+      const list = callsByNode.get(edge.sourceNodeId) ?? [];
+      const conditional = edge.metadata?.conditional === true;
+      list.push({ id: target.id, name: target.name, guard: conditional ? edge.label : undefined, conditional });
+      callsByNode.set(edge.sourceNodeId, list);
+    }
+
+    // Cards grow to fit their call list, so nothing is clipped.
+    const heights = new Map<string, number>();
+    for (const node of input.nodes) {
+      if (!CALLERS.has(node.kind)) continue;
+      const extra = callAreaHeight(callsByNode.get(node.id)?.length ?? 0);
+      if (extra === 0) continue;
+      const nested = Boolean(containingFileId(node, byId, containerIds));
+      heights.set(node.id, (nested ? CHILD_HEIGHT : NODE_HEIGHT) + extra);
+    }
+
+    const { positions, sizes } = await layoutGraph(input, options.direction ?? "RIGHT", options.savedPositions, heights);
 
     const childChangesByFile = summarizeChildChanges(input.nodes, byId, containerIds, options.changedNodeIds);
 
@@ -58,12 +105,16 @@ export const reactFlowAdapter: GraphRendererAdapter = {
         id: graphNode.id,
         type: isContainer ? "fileContainer" : "code",
         position: positions[graphNode.id] ?? { x: 0, y: 0 },
+        // Only outer blocks move. A symbol lives inside its file, so dragging it
+        // (or the lines) pans the canvas instead of tearing it out of place.
+        draggable: !containerId,
         ...(containerId ? { parentId: containerId, extent: "parent" as const } : {}),
         // Containers must paint behind their children.
         ...(isContainer ? { zIndex: 0 } : {}),
         style: { width: size.width, height: size.height },
         data: {
           graphNode,
+          calls: callsByNode.get(graphNode.id) ?? [],
           changeState: options.changedNodeIds?.get(graphNode.id),
           childChanges: childChangesByFile.get(graphNode.id),
           dimmed: options.highlightedNodeIds ? !options.highlightedNodeIds.has(graphNode.id) : false,

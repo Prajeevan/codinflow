@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { GraphNode } from "@codinflow/graph-schema";
-import type { CodeNodeData } from "./adapter";
+import type { CallInfo, CodeNodeData } from "./adapter";
 
 /**
  * Visual grammar (BRIEF §7).
@@ -82,6 +82,41 @@ function describeNode(graphNode: GraphNode): string | undefined {
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
+/** Most calls listed inline on a card before collapsing to "+N more". */
+const MAX_INLINE_CALLS = 4;
+
+/**
+ * The calls a function makes, as readable, clickable rows. A conditional call
+ * shows its guard ("if is audio → transcode()"); a plain one just the callee.
+ * Clicking a row selects that function on the canvas (handled in App via the
+ * row's data-node-id).
+ */
+function CallList({ calls }: { calls: CallInfo[] }) {
+  if (calls.length === 0) return null;
+  const shown = calls.slice(0, MAX_INLINE_CALLS);
+
+  return (
+    <div className="node-calls">
+      {shown.map((call, index) => (
+        <button
+          key={`${call.id}:${index}`}
+          type="button"
+          className="call-row"
+          data-node-id={call.id}
+          title={`Go to ${call.name}`}
+        >
+          {call.guard && <span className="call-guard">{call.guard}</span>}
+          <span className="call-arrow" aria-hidden="true">
+            →
+          </span>
+          <span className="call-name">{call.name}()</span>
+        </button>
+      ))}
+      {calls.length > shown.length && <span className="call-more">+{calls.length - shown.length} more calls</span>}
+    </div>
+  );
+}
+
 /** Turn a signature's inferred return type into "returns …". */
 function returnDescriptor(signature?: string): string | undefined {
   if (!signature) return undefined;
@@ -94,7 +129,7 @@ function returnDescriptor(signature?: string): string | undefined {
 }
 
 export function CodeNode({ data, selected }: NodeProps<Node<CodeNodeData>>) {
-  const { graphNode, changeState, dimmed } = data;
+  const { graphNode, changeState, dimmed, calls } = data;
   const style = KIND_STYLE[graphNode.kind] ?? KIND_STYLE.function!;
   const httpMethod = graphNode.metadata?.httpMethod as string | undefined;
   const accent = httpMethod ? (HTTP_COLORS[httpMethod] ?? style.accent) : style.accent;
@@ -137,8 +172,13 @@ export function CodeNode({ data, selected }: NodeProps<Node<CodeNodeData>>) {
         )}
       </div>
 
-      {/* A nested chip has no body, so its description sits under the header. */}
-      {nested && description && <div className="node-desc nested-desc">{description}</div>}
+      {/* A nested chip has no body, so its description and calls sit under the header. */}
+      {nested && (description || calls.length > 0) && (
+        <div className="nested-body">
+          {description && <div className="node-desc">{description}</div>}
+          <CallList calls={calls} />
+        </div>
+      )}
 
       {!nested && (
         <div className="node-body">
@@ -148,6 +188,8 @@ export function CodeNode({ data, selected }: NodeProps<Node<CodeNodeData>>) {
           </div>
 
           {description && <div className="node-desc">{description}</div>}
+
+          <CallList calls={calls} />
 
           {graphNode.filePath && <div className="node-path">{graphNode.filePath}</div>}
 

@@ -165,7 +165,14 @@ function Workspace() {
       setNodes(
         selectedId ? renderable.nodes.map((node) => (node.id === selectedId ? { ...node, selected: true } : node)) : renderable.nodes,
       );
-      setEdges(renderable.edges);
+      setEdges(
+        selectedId
+          ? renderable.edges.map((edge) => ({
+              ...edge,
+              className: edge.source === selectedId || edge.target === selectedId ? "edge-active" : "edge-muted",
+            }))
+          : renderable.edges,
+      );
 
       // Frame from ELK's own coordinates: fitView would have to wait for React
       // Flow to measure, and reads stale dimensions when the node set swaps.
@@ -202,6 +209,25 @@ function Workspace() {
       return changed ? next : current;
     });
   }, [selectedNodeId, setNodes]);
+
+  // Light up the selected block's own edges and mute the rest, so its connections
+  // stand out of the tangle. CSS on the class does the colour + flow animation.
+  useEffect(() => {
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((edge) => {
+        const className = !selectedNodeId
+          ? undefined
+          : edge.source === selectedNodeId || edge.target === selectedNodeId
+            ? "edge-active"
+            : "edge-muted";
+        if (edge.className === className) return edge;
+        changed = true;
+        return { ...edge, className };
+      });
+      return changed ? next : current;
+    });
+  }, [selectedNodeId, setEdges]);
 
   const focusNode = useCallback(
     (nodeId: string) => {
@@ -442,9 +468,18 @@ function Workspace() {
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             onNodeClick={(event, node) => {
+              const element = event.target as HTMLElement;
+              // A call row jumps to the function it names, rather than selecting
+              // the card the row lives on.
+              const callRow = element.closest(".call-row");
+              const target = callRow?.getAttribute("data-node-id");
+              if (target) {
+                focusNode(target);
+                return;
+              }
               setSelectedNodeId(node.id);
               // The code icon opens the source directly; anything else selects.
-              if ((event.target as HTMLElement).classList.contains("code-icon")) {
+              if (element.classList.contains("code-icon")) {
                 showCode((node.data as CodeNodeData).graphNode);
               }
             }}
@@ -452,6 +487,13 @@ function Workspace() {
             onPaneClick={() => setSelectedNodeId(null)}
             minZoom={0.05}
             maxZoom={2}
+            // Trackpad-native navigation: two-finger drag pans, pinch zooms, and
+            // Cmd/Ctrl+scroll zooms. Plain scroll pans rather than zooming.
+            panOnScroll
+            zoomOnScroll={false}
+            zoomOnPinch
+            zoomActivationKeyCode={["Meta", "Control"]}
+            panOnDrag
           >
             <Background gap={24} color="var(--canvas-dot)" />
             <Controls />

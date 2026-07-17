@@ -94,6 +94,7 @@ export async function layoutGraph(
   view: GraphView,
   direction: "RIGHT" | "DOWN",
   savedPositions?: Positions,
+  heights?: Map<string, number>,
 ): Promise<LayoutResult> {
   if (view.nodes.length === 0) return { positions: {}, sizes: {} };
 
@@ -118,7 +119,7 @@ export async function layoutGraph(
     const children = childrenOf.get(node.id) ?? [];
 
     if (children.length === 0) {
-      return { id: node.id, width: NODE_WIDTH, height: NODE_HEIGHT };
+      return { id: node.id, width: NODE_WIDTH, height: heights?.get(node.id) ?? NODE_HEIGHT };
     }
 
     return {
@@ -130,7 +131,11 @@ export async function layoutGraph(
         "elk.spacing.nodeNode": "10",
         "elk.layered.spacing.nodeNodeBetweenLayers": "10",
       },
-      children: children.map((child) => ({ id: child.id, width: CHILD_WIDTH, height: CHILD_HEIGHT })),
+      children: children.map((child) => ({
+        id: child.id,
+        width: CHILD_WIDTH,
+        height: heights?.get(child.id) ?? CHILD_HEIGHT,
+      })),
     };
   };
 
