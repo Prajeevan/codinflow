@@ -80,12 +80,9 @@ else await runAnalyze();
 // ---------------------------------------------------------------------------
 
 async function runAnalyze(): Promise<void> {
-  if (operands.length === 0) {
-    console.log(USAGE);
-    process.exit(1);
-  }
-
-  const { dir: rootDir, cloned } = cloneIfRemote(operands[0]!);
+  // No path given → analyze the current folder.
+  const target = operands[0] ?? ".";
+  const { dir: rootDir, cloned } = cloneIfRemote(target);
   if (!existsSync(rootDir)) {
     console.error(`no such directory: ${rootDir}`);
     process.exit(1);
