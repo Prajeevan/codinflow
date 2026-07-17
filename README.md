@@ -119,15 +119,19 @@ cd packages/analyzer-js-ts
 npx tsx src/cli.ts /path/to/repo --repository-id my-repo --commit-sha $(git -C /path/to/repo rev-parse HEAD)
 ```
 
-Deploy. `account_id` is not committed, so set `CLOUDFLARE_ACCOUNT_ID` to your
-Cloudflare account first (the wrangler default account may be a different one):
+There are two release paths, kept separate:
 
 ```bash
+# 1. Cloudflare — deploy the hosted stack (API worker + web app).
+#    account_id is not committed, so point wrangler at the right account first.
 export CLOUDFLARE_ACCOUNT_ID=<your-cloudflare-account-id>
-pnpm --filter @codinflow/api run db:migrate
-pnpm --filter @codinflow/api run deploy
-pnpm --filter @codinflow/web run deploy
+pnpm deploy
+
+# 2. npm — publish the `codinflow` CLI (no Cloudflare involved).
+pnpm publish:cli                    # add `-- --otp=123456` if npm asks for 2FA
 ```
+
+First-time API setup also needs the schema: `pnpm --filter @codinflow/api run db:migrate`.
 
 ## Next milestone
 
