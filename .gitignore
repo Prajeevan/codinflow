@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+out/
+artifacts/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Private strategy/architecture docs — not published
+docs/

@@ -1,0 +1,48 @@
+{
+  "name": "codinflow",
+  "version": "0.1.0",
+  "description": "Turn any JavaScript/TypeScript repository into a visual, human-readable map of application behaviour.",
+  "type": "module",
+  "bin": {
+    "codinflow": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "code-analysis",
+    "codebase",
+    "visualization",
+    "typescript",
+    "javascript",
+    "ast",
+    "dependency-graph",
+    "static-analysis",
+    "architecture"
+  ],
+  "license": "MIT",
+  "author": "Prajeevan",
+  "homepage": "https://github.com/Prajeevan/codinflow#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prajeevan/codinflow.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Prajeevan/codinflow/issues"
+  },
+  "dependencies": {
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "prepublishOnly": "node build.mjs"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "codinflow",
+  "compatibility_date": "2025-07-01",
+  // account_id is intentionally not committed. Set CLOUDFLARE_ACCOUNT_ID before
+  // deploying (the default wrangler account is a different one).
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": { "enabled": true }
+}

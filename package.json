@@ -1,0 +1,20 @@
+{
+  "name": "codinflow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@9.13.2",
+  "scripts": {
+    "analyze:fixture": "pnpm --filter @codinflow/analyzer-js-ts run analyze:fixture",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "dev:api": "pnpm --filter @codinflow/api run dev",
+    "dev:web": "pnpm --filter @codinflow/web run dev",
+    "deploy:api": "pnpm --filter @codinflow/api run deploy",
+    "codinflow": "pnpm --filter @codinflow/analyzer-js-ts exec tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

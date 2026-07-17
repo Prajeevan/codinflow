@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CodinFlow — visual code intelligence</title>
+    <script>
+      // Apply the saved theme before first paint so light mode never flashes dark.
+      // No stored choice (or "system") leaves the attribute off, letting the OS
+      // preference drive the tokens via the prefers-color-scheme media query.
+      (function () {
+        try {
+          var choice = localStorage.getItem("codinflow-theme");
+          if (choice === "light" || choice === "dark") {
+            document.documentElement.setAttribute("data-theme", choice);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

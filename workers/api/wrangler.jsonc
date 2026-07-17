@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "codinflow-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // account_id is intentionally not committed to this public repo. The default
+  // wrangler account is a different one, so before deploying set the environment
+  // variable CLOUDFLARE_ACCOUNT_ID to the correct account (or pass
+  // `wrangler deploy --account-id <id>`), otherwise resources land in the wrong one.
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "codinflow",
+      "database_id": "051391ec-6910-4b1d-b96a-955817ada422"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "codinflow-artifacts"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "19b08006cbe640eea17853babbbce6fa"
+    }
+  ],
+  "ai": { "binding": "AI" }
+}

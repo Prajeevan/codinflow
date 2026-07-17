@@ -1,0 +1,23 @@
+{
+  "name": "@codinflow/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute codinflow --remote --file=schema.sql",
+    "db:migrate:local": "wrangler d1 execute codinflow --local --file=schema.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codinflow/graph-diff": "workspace:*",
+    "@codinflow/graph-schema": "workspace:*",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.111.0"
+  }
+}

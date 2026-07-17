@@ -1,0 +1,11 @@
+{
+  "name": "multi-framework-fixture",
+  "private": true,
+  "dependencies": {
+    "next": "14.0.0",
+    "@sveltejs/kit": "2.0.0",
+    "hono": "4.0.0",
+    "fastify": "4.0.0",
+    "@tanstack/react-router": "1.0.0"
+  }
+}

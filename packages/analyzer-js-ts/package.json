@@ -1,0 +1,25 @@
+{
+  "name": "@codinflow/analyzer-js-ts",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "analyze:fixture": "tsx src/cli.ts ../../fixtures/express-api --repository-id fixture-express --commit-sha fixture0 --out ../../artifacts/express-api.graph.json"
+  },
+  "dependencies": {
+    "@codinflow/analyzer-core": "workspace:*",
+    "@codinflow/graph-schema": "workspace:*",
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}
