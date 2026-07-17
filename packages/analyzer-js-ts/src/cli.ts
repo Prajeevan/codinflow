@@ -132,7 +132,13 @@ async function runAnalyze(): Promise<void> {
   await maybeUpload(snapshot, repositoryId, commitSha);
 
   if (!values.out && !values.api && !process.env.CODINFLOW_API) {
-    process.stdout.write(JSON.stringify(snapshot, null, 2));
+    // Raw JSON only when it's being captured (piped/redirected) or asked for.
+    // An interactive run gets a readable summary instead of a wall of JSON.
+    if (values.json || !process.stdout.isTTY) {
+      process.stdout.write(JSON.stringify(snapshot, null, 2));
+    } else {
+      console.error(analyzeGuidance(snapshot, operands[0] ?? ".", !cloned));
+    }
   }
 
   if (cloned) console.error(`(clone left in ${rootDir})`);
@@ -312,6 +318,38 @@ function printQueryHuman(fn: string, reports: ReturnType<typeof buildReport>[], 
     }
     console.error("");
   }
+}
+
+/** What to do next after an interactive analyze — instead of dumping JSON. */
+function analyzeGuidance(snapshot: GraphSnapshot, where: string, cached: boolean): string {
+  const exported = snapshot.nodes
+    .filter((n) => ["function", "method", "class"].includes(n.kind) && n.visibility === "public")
+    .map((n) => n.name);
+
+  const lines = [``];
+  if (exported.length > 0) {
+    lines.push(`  Exported symbols (${exported.length}): ${exported.slice(0, 8).join(", ")}${exported.length > 8 ? "…" : ""}`, ``);
+  }
+
+  if (cached) {
+    lines.push(
+      `  Explore it (graph cached in ${where}/.codinflow):`,
+      `    codinflow query --fn <name> ${where}     who calls / imports a function`,
+      `    codinflow status ${where}                 has the code changed since?`,
+      ``,
+    );
+  }
+
+  lines.push(
+    `  See it in the visual app (needs an ingest token):`,
+    `    codinflow ${where} --api https://codinflow-api.software-93f.workers.dev --token $CODINFLOW_TOKEN`,
+    `    then open https://codinflow.software-93f.workers.dev`,
+    ``,
+    `  Save or pipe the raw graph:  codinflow ${where} --out graph.json   ·   codinflow ${where} --json`,
+    ``,
+  );
+
+  return lines.join("\n");
 }
 
 function printJson(value: unknown): void {
