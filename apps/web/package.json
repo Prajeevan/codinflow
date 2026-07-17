@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:embedded": "vite build --mode embedded --outDir dist-embedded",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit"

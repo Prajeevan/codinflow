@@ -45,6 +45,11 @@ const THEME_GLYPH: Record<ThemeChoice, string> = {
   dark: "☾",
 };
 
+/** True when served by the CLI's local viewer (`codinflow --ui`): one project,
+ * no hosted API, no repository picker. */
+const LOCAL_MODE =
+  typeof window !== "undefined" && (window as unknown as { __CODINFLOW_LOCAL__?: boolean }).__CODINFLOW_LOCAL__ === true;
+
 export default function App() {
   return (
     <ReactFlowProvider>
@@ -297,15 +302,23 @@ function Workspace() {
           </span>
         </div>
 
-        <label className="controls">
-          <select value={repositoryId} onChange={(event) => selectRepository(event.target.value)} aria-label="Repository">
-            {(repositories.data?.repositories ?? []).map((repository) => (
-              <option key={repository.id} value={repository.id}>
-                {repository.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        {LOCAL_MODE ? (
+          // Local (CLI --ui) mode serves exactly one project, so there is nothing
+          // to pick between — show its name instead of a selector.
+          <span className="repo-name mono" title={repositoryId}>
+            {repositoryId}
+          </span>
+        ) : (
+          <label className="controls">
+            <select value={repositoryId} onChange={(event) => selectRepository(event.target.value)} aria-label="Repository">
+              {(repositories.data?.repositories ?? []).map((repository) => (
+                <option key={repository.id} value={repository.id}>
+                  {repository.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <div className="toolbar">
           <div className="search">

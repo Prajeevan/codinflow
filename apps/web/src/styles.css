@@ -1249,6 +1249,21 @@ ul.routes {
   color: var(--text-subtle);
 }
 
+/* The single project name shown instead of a picker in local (--ui) mode. */
+.repo-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- edges ---- */
 
 /* Lines never intercept the pointer, so clicking or dragging one pans the canvas

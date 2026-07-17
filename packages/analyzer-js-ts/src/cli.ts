@@ -3,11 +3,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { GraphSnapshot } from "@codinflow/graph-schema";
 import { analyzeRepository } from "./extract.js";
 import { cacheDir, detectChanges, hasDrift, readCache, writeCache, type Changes } from "./cache.js";
 import { buildReport, findSymbols, parseOutputs, stalenessFor } from "./query.js";
+import { openBrowser, startLocalServer } from "./local-server.js";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -22,6 +24,8 @@ const { values, positionals } = parseArgs({
     output: { type: "string" },
     json: { type: "boolean" },
     refresh: { type: "boolean" },
+    ui: { type: "boolean" },
+    port: { type: "string" },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -30,6 +34,7 @@ const USAGE = `
 codinflow — analyze a JavaScript/TypeScript repository into a behaviour graph
 
   codinflow [analyze] <path-or-github-url> [options]   analyze a repo
+  codinflow --ui [path]                                open the visual canvas locally (no token)
   codinflow status [path]                              is the cached graph still current?
   codinflow query --fn <name> [path] [options]         what calls / is-used-by a function
 
@@ -61,7 +66,7 @@ if (values.help) {
   process.exit(0);
 }
 
-const VERBS = new Set(["analyze", "status", "query"]);
+const VERBS = new Set(["analyze", "status", "query", "ui"]);
 const hasVerb = positionals[0] !== undefined && VERBS.has(positionals[0]);
 const verb = hasVerb ? positionals[0]! : "analyze";
 const operands = hasVerb ? positionals.slice(1) : positionals;
@@ -73,7 +78,8 @@ const operands = hasVerb ? positionals.slice(1) : positionals;
  */
 const invocationDir = process.env.INIT_CWD ?? process.cwd();
 
-if (verb === "status") await runStatus();
+if (verb === "ui" || values.ui) await runUi();
+else if (verb === "status") await runStatus();
 else if (verb === "query") await runQuery();
 else await runAnalyze();
 
@@ -223,6 +229,45 @@ async function runQuery(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+
+async function runUi(): Promise<void> {
+  const { dir: rootDir, cloned } = cloneIfRemote(operands[0] ?? ".");
+  if (!existsSync(rootDir)) fail(`no such directory: ${rootDir}`);
+
+  // Reuse the cached graph when the working tree hasn't drifted; otherwise
+  // re-analyze and refresh the cache (the hash check the user asked for).
+  let snapshot: GraphSnapshot;
+  const cached = cloned ? null : readCache(rootDir);
+  if (cached && !hasDrift(detectChanges(rootDir, cached.manifest))) {
+    snapshot = cached.snapshot;
+    console.error(`using cached graph (${snapshot.nodes.length} nodes) — current with the working tree`);
+  } else {
+    const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
+    const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
+    console.error(`analyzing ${rootDir}…`);
+    snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
+    if (!cloned) writeCache(rootDir, snapshot);
+    console.error(`analyzed ${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges`);
+  }
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const webDir = process.env.CODINFLOW_WEB_DIR ?? path.join(here, "..", "web");
+  const port = values.port ? Number(values.port) : 9338;
+
+  const server = await startLocalServer({ snapshot, webDir, port }).catch((error): never =>
+    fail(String(error instanceof Error ? error.message : error)),
+  );
+
+  console.error(`\n  CodinFlow UI → ${server.url}`);
+  console.error(`  Serving ${snapshot.repositoryId} locally. No upload, no token.`);
+  console.error(`  Ctrl+C to stop.\n`);
+  openBrowser(server.url);
+
+  process.on("SIGINT", () => {
+    server.close();
+    process.exit(0);
+  });
+}
 
 async function maybeUpload(snapshot: GraphSnapshot, repositoryId: string, commitSha: string): Promise<void> {
   const api = values.api ?? process.env.CODINFLOW_API;

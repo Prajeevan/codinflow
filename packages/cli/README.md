@@ -4,12 +4,24 @@ Turn any JavaScript/TypeScript repository into a visual, human-readable map of
 application behaviour — routes, functions, data stores, external calls and how
 they connect — extracted with the TypeScript compiler (real types, not guesses).
 
-## Run it (no install)
+## See it (no install, no account)
+
+```bash
+npx codinflow --ui          # analyze the current folder and open the visual canvas
+npx codinflow --ui ./my-app
+```
+
+This analyzes the folder, starts a local server (default `http://127.0.0.1:9338`)
+and opens the interactive canvas in your browser — files, functions, routes,
+data stores and how they connect. Entirely local: no upload, no token, no hosted
+service. Re-running reuses the cached graph when your code hasn't changed.
+
+## Analyze to a file / pipe
 
 ```bash
 npx codinflow ./my-app --out graph.json
 bunx codinflow ./my-app --out graph.json
-pnpm dlx codinflow ./my-app --out graph.json
+pnpm dlx codinflow ./my-app --json | jq .stats
 ```
 
 A public GitHub repository, by `owner/repo` shorthand or full URL:

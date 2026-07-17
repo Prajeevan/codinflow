@@ -15,3 +15,7 @@ docs/
 
 # Local warm-graph cache written by the codinflow CLI
 .codinflow/
+
+# Embedded UI build + its vendored copy in the CLI (generated)
+apps/web/dist-embedded/
+packages/cli/web/
