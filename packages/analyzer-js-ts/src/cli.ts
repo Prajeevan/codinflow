@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import type { GraphSnapshot } from "@codinflow/graph-schema";
 import { analyzeRepository } from "./extract.js";
+import { cacheDir, detectChanges, hasDrift, readCache, writeCache, type Changes } from "./cache.js";
+import { buildReport, findSymbols, parseOutputs, stalenessFor } from "./query.js";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -16,6 +18,10 @@ const { values, positionals } = parseArgs({
     api: { type: "string" },
     token: { type: "string" },
     branch: { type: "string" },
+    fn: { type: "string" },
+    output: { type: "string" },
+    json: { type: "boolean" },
+    refresh: { type: "boolean" },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -23,9 +29,11 @@ const { values, positionals } = parseArgs({
 const USAGE = `
 codinflow — analyze a JavaScript/TypeScript repository into a behaviour graph
 
-  analyze <path-or-github-url> [options]
+  codinflow [analyze] <path-or-github-url> [options]   analyze a repo
+  codinflow status [path]                              is the cached graph still current?
+  codinflow query --fn <name> [path] [options]         what calls / is-used-by a function
 
-Options
+Analyze options
   --repository-id <id>   Name it in the UI (default: folder or repo name)
   --commit-sha <sha>     Commit to label this snapshot (default: current git HEAD)
   --branch <name>        Branch to clone, for a GitHub URL
@@ -33,43 +41,204 @@ Options
   --api <url>            Upload to a CodinFlow API and make it visible in the app
   --token <token>        Bearer token for --api (or set CODINFLOW_TOKEN)
 
+Query options
+  --fn <name>            Function/method/class to inspect (a trailing () is fine)
+  --output <list>        Comma list: calls,usedBy,importedBy,reads,writes,throws,external
+  --refresh              Re-analyze before answering (guarantees a fresh result)
+  --json                 Machine-readable output (for status and query)
+
+Analyze caches a warm graph in <path>/.codinflow. status and query read it and
+report how stale it is versus the working tree, so an answer is never silently old.
+
 Examples
-  # a local folder, uploaded to the hosted app
-  codinflow analyze ./my-app --api https://codinflow-api.software-93f.workers.dev --token $CODINFLOW_TOKEN
-
-  # a public GitHub repository
-  codinflow analyze https://github.com/honojs/hono --api $CODINFLOW_API --token $CODINFLOW_TOKEN
-
-  # just write the graph to a file
-  codinflow analyze ./my-app --out graph.json
+  codinflow analyze ./my-app
+  codinflow status ./my-app
+  codinflow query --fn getRouter --output importedBy,usedBy,calls --json ./my-app
 `;
 
-// `analyze` is an optional leading verb: `codinflow analyze <path>` and
-// `codinflow <path>` both work, so following the help text can never fail.
-const operands = positionals[0] === "analyze" ? positionals.slice(1) : positionals;
-
-if (values.help || operands.length === 0) {
+if (values.help) {
   console.log(USAGE);
-  process.exit(values.help ? 0 : 1);
+  process.exit(0);
 }
 
-const target = operands[0]!;
+const VERBS = new Set(["analyze", "status", "query"]);
+const hasVerb = positionals[0] !== undefined && VERBS.has(positionals[0]);
+const verb = hasVerb ? positionals[0]! : "analyze";
+const operands = hasVerb ? positionals.slice(1) : positionals;
 
 /**
- * The directory the user actually typed the command in.
- *
- * A package manager runs scripts with cwd set to the package, so a relative path
- * the user passed would otherwise resolve against the wrong directory. INIT_CWD
- * is where they were standing.
+ * The directory the user actually typed the command in. A package manager runs
+ * scripts with cwd set to the package, so a relative path the user passed would
+ * otherwise resolve against the wrong directory. INIT_CWD is where they stood.
  */
 const invocationDir = process.env.INIT_CWD ?? process.cwd();
 
-/**
- * Clones a GitHub repository shallowly.
- *
- * `--depth 1` keeps the fetch small, and no repository script is ever executed:
- * we clone and parse, never install or build.
- */
+if (verb === "status") await runStatus();
+else if (verb === "query") await runQuery();
+else await runAnalyze();
+
+// ---------------------------------------------------------------------------
+
+async function runAnalyze(): Promise<void> {
+  if (operands.length === 0) {
+    console.log(USAGE);
+    process.exit(1);
+  }
+
+  const { dir: rootDir, cloned } = cloneIfRemote(operands[0]!);
+  if (!existsSync(rootDir)) {
+    console.error(`no such directory: ${rootDir}`);
+    process.exit(1);
+  }
+
+  const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
+  const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
+
+  console.error(`analyzing ${rootDir}`);
+  const started = Date.now();
+  const snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
+  const duration = Date.now() - started;
+
+  console.error(
+    [
+      ``,
+      `  repository   ${repositoryId} @ ${commitSha}`,
+      `  analyzed in  ${duration}ms`,
+      `  graph        ${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges`,
+      `  frameworks   ${snapshot.frameworks.map((f) => f.name).join(", ") || "none detected"}`,
+      `  routes       ${snapshot.stats.routeCount}`,
+      `  calls resolved ${Math.round(snapshot.stats.resolvedCallRatio * 100)}%`,
+      snapshot.warnings.length > 0 ? `  warnings     ${snapshot.warnings.length} (see graph.warnings)` : ``,
+      ``,
+    ]
+      .filter((line) => line !== ``)
+      .join("\n"),
+  );
+
+  // A local repo gets a warm-graph cache for `status`/`query`; a throwaway clone
+  // does not (its temp dir vanishes).
+  if (!cloned) {
+    writeCache(rootDir, snapshot);
+    console.error(`cached graph → ${path.join(rootDir, ".codinflow")} (add .codinflow/ to .gitignore)`);
+  }
+
+  if (values.out) {
+    const outPath = path.resolve(invocationDir, values.out);
+    mkdirSync(path.dirname(outPath), { recursive: true });
+    writeFileSync(outPath, JSON.stringify(snapshot, null, 2));
+    console.error(`wrote ${outPath}`);
+  }
+
+  await maybeUpload(snapshot, repositoryId, commitSha);
+
+  if (!values.out && !values.api && !process.env.CODINFLOW_API) {
+    process.stdout.write(JSON.stringify(snapshot, null, 2));
+  }
+
+  if (cloned) console.error(`(clone left in ${rootDir})`);
+}
+
+async function runStatus(): Promise<void> {
+  const rootDir = path.resolve(invocationDir, operands[0] ?? ".");
+  const cached = readCache(rootDir);
+  if (!cached) {
+    fail(`no cached graph in ${cacheDir(rootDir)}. Run: codinflow analyze ${operands[0] ?? "."}`);
+  }
+
+  const changes = detectChanges(rootDir, cached.manifest);
+  const ageSeconds = Math.max(0, Math.round((Date.now() - Date.parse(cached.manifest.generatedAt)) / 1000));
+  const affectedSymbols = symbolsInFiles(cached.snapshot, new Set([...changes.changed, ...changes.removed]));
+
+  if (values.json) {
+    printJson({
+      graphGeneratedAt: cached.manifest.generatedAt,
+      commitSha: cached.manifest.commitSha,
+      ageSeconds,
+      current: !hasDrift(changes),
+      ...changes,
+      staleSymbols: affectedSymbols,
+    });
+    return;
+  }
+
+  const line = (label: string, items: string[]) =>
+    items.length ? console.error(`  ${label} (${items.length}):\n${items.map((i) => `    ${i}`).join("\n")}`) : undefined;
+
+  console.error(`\n  graph      ${cached.manifest.repositoryId} @ ${cached.manifest.commitSha}`);
+  console.error(`  cached     ${humanAge(ageSeconds)} ago (${cached.manifest.generatedAt})`);
+  if (!hasDrift(changes)) {
+    console.error(`  status     ✓ current — no source files changed since the graph\n`);
+    return;
+  }
+  console.error(`  status     ⚠ stale — the working tree drifted since the graph`);
+  line("changed", changes.changed);
+  line("added", changes.added);
+  line("removed", changes.removed);
+  if (affectedSymbols.length) {
+    console.error(`  possibly-stale symbols (${affectedSymbols.length}): ${affectedSymbols.slice(0, 12).join(", ")}${affectedSymbols.length > 12 ? "…" : ""}`);
+  }
+  console.error(`  → refresh with: codinflow analyze ${operands[0] ?? "."}\n`);
+}
+
+async function runQuery(): Promise<void> {
+  if (!values.fn) fail("query needs --fn <name>. Example: codinflow query --fn getRouter ./my-app");
+
+  const rootDir = path.resolve(invocationDir, operands[0] ?? ".");
+  const outputs = parseOutputs(values.output);
+
+  let snapshot: GraphSnapshot;
+  let changes: Changes;
+
+  if (values.refresh) {
+    if (!existsSync(rootDir)) fail(`no such directory: ${rootDir}`);
+    const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
+    const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
+    console.error(`refreshing graph for ${rootDir}…`);
+    snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
+    writeCache(rootDir, snapshot);
+    changes = { changed: [], added: [], removed: [] };
+  } else {
+    const cached = readCache(rootDir);
+    if (!cached) {
+      fail(`no cached graph in ${cacheDir(rootDir)}. Run: codinflow analyze ${operands[0] ?? "."} (or pass --refresh)`);
+    }
+    snapshot = cached.snapshot;
+    changes = detectChanges(rootDir, cached.manifest);
+  }
+
+  const matches = findSymbols(snapshot, values.fn);
+  const reports = matches.map((node) => buildReport(snapshot, node, outputs));
+  const relevantFiles = [...new Set(reports.flatMap((report) => report.relevantFiles))];
+  const staleness = stalenessFor(changes, snapshot.generatedAt, Date.now(), relevantFiles);
+
+  if (values.json) {
+    printJson({ query: { fn: values.fn, outputs }, staleness, matchCount: matches.length, matches: reports });
+    return;
+  }
+
+  printQueryHuman(values.fn, reports, staleness);
+}
+
+// ---------------------------------------------------------------------------
+
+async function maybeUpload(snapshot: GraphSnapshot, repositoryId: string, commitSha: string): Promise<void> {
+  const api = values.api ?? process.env.CODINFLOW_API;
+  const token = values.token ?? process.env.CODINFLOW_TOKEN;
+  if (!api) return;
+
+  if (!token) fail("--api needs --token (or CODINFLOW_TOKEN). Ingestion is authenticated.");
+
+  const url = `${api.replace(/\/$/, "")}/api/v1/repositories/${encodeURIComponent(repositoryId)}/snapshots/${encodeURIComponent(commitSha)}`;
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(snapshot),
+  });
+
+  if (!response.ok) fail(`upload failed: ${response.status} ${await response.text()}`);
+  console.error(`uploaded → open the app and pick "${repositoryId}"`);
+}
+
 function cloneIfRemote(input: string): { dir: string; cloned: boolean } {
   const isRemote = /^(https?:\/\/|git@)/.test(input) || /^[\w.-]+\/[\w.-]+$/.test(input);
   if (!isRemote) return { dir: path.resolve(invocationDir, input), cloned: false };
@@ -81,7 +250,6 @@ function cloneIfRemote(input: string): { dir: string; cloned: boolean } {
   const args = ["clone", "--depth", "1", "--quiet"];
   if (values.branch) args.push("--branch", values.branch);
   args.push(url, dir);
-
   execFileSync("git", args, { stdio: ["ignore", "ignore", "inherit"] });
   return { dir, cloned: true };
 }
@@ -94,72 +262,69 @@ function gitSha(dir: string): string | undefined {
   }
 }
 
-const { dir: rootDir, cloned } = cloneIfRemote(target);
+function symbolsInFiles(snapshot: GraphSnapshot, files: Set<string>): string[] {
+  if (files.size === 0) return [];
+  return snapshot.nodes
+    .filter((node) => ["function", "method", "class"].includes(node.kind) && node.filePath && files.has(node.filePath))
+    .map((node) => node.name)
+    .sort();
+}
 
-if (!existsSync(rootDir)) {
-  console.error(`no such directory: ${rootDir}`);
+function printQueryHuman(fn: string, reports: ReturnType<typeof buildReport>[], staleness: ReturnType<typeof stalenessFor>): void {
+  const banner =
+    staleness.verdict === "fresh"
+      ? `✓ graph current`
+      : staleness.verdict === "stale-affected"
+        ? `⚠ graph ${humanAge(staleness.ageSeconds)} old — files this answer depends on CHANGED: ${staleness.affectedFiles.join(", ")}. Re-run with --refresh.`
+        : `~ graph ${humanAge(staleness.ageSeconds)} old, but nothing this answer depends on changed.`;
+  console.error(`\n${banner}\n`);
+
+  if (reports.length === 0) {
+    console.error(`  no function/method/class named "${fn}" in the graph.`);
+    if (staleness.verdict !== "fresh") console.error(`  (the graph is stale — it may have been added since; try --refresh.)`);
+    console.error("");
+    return;
+  }
+
+  for (const report of reports) {
+    const s = report.symbol;
+    console.error(`  ${s.name}${s.exported ? " (exported)" : ""} — ${s.kind}`);
+    console.error(`  ${s.description}`);
+    if (s.filePath) console.error(`  ${s.filePath}${s.startLine ? `:${s.startLine}` : ""}`);
+
+    if (report.importedBy?.length) {
+      console.error(`\n  Imported by (${report.importedBy.length} file${report.importedBy.length === 1 ? "" : "s"}):`);
+      for (const group of report.importedBy) {
+        console.error(`    ${group.file} — ${group.callers.map((c) => `${c.name}${c.line ? `:${c.line}` : ""}`).join(", ")}`);
+      }
+    } else if (report.usedBy?.length) {
+      console.error(`\n  Used by (${report.usedBy.length} file${report.usedBy.length === 1 ? "" : "s"}):`);
+      for (const group of report.usedBy) {
+        console.error(`    ${group.file} — ${group.callers.map((c) => c.name).join(", ")}`);
+      }
+    }
+
+    if (report.calls?.length) {
+      console.error(`\n  Calls:`);
+      for (const call of report.calls) {
+        console.error(`    ${call.guard ? `${call.guard} → ` : "→ "}${call.name}()`);
+      }
+    }
+    console.error("");
+  }
+}
+
+function printJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function humanAge(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
+
+function fail(message: string): never {
+  console.error(message);
   process.exit(1);
-}
-
-const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
-const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
-
-console.error(`analyzing ${rootDir}`);
-const started = Date.now();
-const snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
-const duration = Date.now() - started;
-
-console.error(
-  [
-    ``,
-    `  repository   ${repositoryId} @ ${commitSha}`,
-    `  analyzed in  ${duration}ms`,
-    `  graph        ${snapshot.nodes.length} nodes, ${snapshot.edges.length} edges`,
-    `  frameworks   ${snapshot.frameworks.map((f) => f.name).join(", ") || "none detected"}`,
-    `  routes       ${snapshot.stats.routeCount}`,
-    `  calls resolved ${Math.round(snapshot.stats.resolvedCallRatio * 100)}%`,
-    snapshot.warnings.length > 0 ? `  warnings     ${snapshot.warnings.length} (see graph.warnings)` : ``,
-    ``,
-  ]
-    .filter((line) => line !== ``)
-    .join("\n"),
-);
-
-if (values.out) {
-  const outPath = path.resolve(invocationDir, values.out);
-  mkdirSync(path.dirname(outPath), { recursive: true });
-  writeFileSync(outPath, JSON.stringify(snapshot, null, 2));
-  console.error(`wrote ${outPath}`);
-}
-
-const api = values.api ?? process.env.CODINFLOW_API;
-const token = values.token ?? process.env.CODINFLOW_TOKEN;
-
-if (api) {
-  if (!token) {
-    console.error("--api needs --token (or CODINFLOW_TOKEN). Ingestion is authenticated.");
-    process.exit(1);
-  }
-
-  const url = `${api.replace(/\/$/, "")}/api/v1/repositories/${encodeURIComponent(repositoryId)}/snapshots/${encodeURIComponent(commitSha)}`;
-  const response = await fetch(url, {
-    method: "PUT",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify(snapshot),
-  });
-
-  if (!response.ok) {
-    console.error(`upload failed: ${response.status} ${await response.text()}`);
-    process.exit(1);
-  }
-
-  console.error(`uploaded → open the app and pick "${repositoryId}"`);
-}
-
-if (!values.out && !api) {
-  process.stdout.write(JSON.stringify(snapshot, null, 2));
-}
-
-if (cloned) {
-  console.error(`(clone left in ${rootDir})`);
 }

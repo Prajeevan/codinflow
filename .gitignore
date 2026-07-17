@@ -12,3 +12,6 @@ artifacts/
 
 # Private strategy/architecture docs — not published
 docs/
+
+# Local warm-graph cache written by the codinflow CLI
+.codinflow/

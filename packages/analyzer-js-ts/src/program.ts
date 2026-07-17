@@ -115,6 +115,17 @@ export function loadProject(rootDir: string): LoadedProject {
   };
 }
 
+/**
+ * Repository-relative source files, discovered without building a Program.
+ *
+ * Used by staleness checks to spot files added since a graph was cached, cheaply
+ * — no type-checking, just a directory walk with the same ignore rules.
+ */
+export function listSourceFiles(rootDir: string): string[] {
+  const absoluteRoot = path.resolve(rootDir);
+  return discoverSourceFiles(absoluteRoot).map((file) => path.relative(absoluteRoot, file));
+}
+
 function discoverSourceFiles(rootDir: string): string[] {
   const entries = ts.sys.readDirectory(
     rootDir,
