@@ -219,17 +219,19 @@ export function startLocalServer(options: {
 
 function handle(req: IncomingMessage, res: ServerResponse, snapshot: GraphSnapshot, webDir: string, indexHtml: string): void {
   const url = new URL(req.url ?? "/", "http://localhost");
-  const pathname = decodeURIComponent(url.pathname);
 
-  if (pathname.startsWith("/api/v1/")) return api(pathname, url.searchParams, snapshot, res);
-  return serveStatic(pathname, webDir, indexHtml, res);
+  if (url.pathname.startsWith("/api/v1/")) {
+    // Decode PER SEGMENT: a node/route id (e.g. "repo:route:PAGE:/products") is
+    // sent url-encoded, so its internal "/" must not be treated as a separator.
+    const parts = url.pathname.split("/").filter(Boolean).map((segment) => decodeURIComponent(segment));
+    return api(parts, url.searchParams, snapshot, res);
+  }
+  return serveStatic(decodeURIComponent(url.pathname), webDir, indexHtml, res);
 }
 
-function api(pathname: string, params: URLSearchParams, snapshot: GraphSnapshot, res: ServerResponse): void {
-  const parts = pathname.split("/").filter(Boolean); // api v1 repositories :id ...
-  const tail = parts.slice(4); // after repositories/:id
-
-  if (pathname === "/api/v1/repositories") {
+// parts: ["api", "v1", "repositories", <id>, <section>, <arg>]
+function api(parts: string[], params: URLSearchParams, snapshot: GraphSnapshot, res: ServerResponse): void {
+  if (parts.length === 3 && parts[2] === "repositories") {
     return json(res, {
       repositories: [
         { id: snapshot.repositoryId, full_name: snapshot.repositoryId, commit_sha: snapshot.commitSha, node_count: snapshot.nodes.length },
@@ -237,7 +239,9 @@ function api(pathname: string, params: URLSearchParams, snapshot: GraphSnapshot,
     });
   }
 
-  const section = tail[0];
+  const section = parts[4];
+  const arg = parts[5];
+
   if (section === "commits") {
     return json(res, {
       commits: [{ commit_sha: snapshot.commitSha, node_count: snapshot.nodes.length, created_at: snapshot.generatedAt }],
@@ -254,9 +258,9 @@ function api(pathname: string, params: URLSearchParams, snapshot: GraphSnapshot,
       direction: (params.get("direction") as "in" | "out" | "both" | null) ?? undefined,
     }));
   }
-  if (section === "paths" && tail[1]) return json(res, executionPath(snapshot, tail[1]));
-  if (section === "nodes" && tail[1]) {
-    const detail = nodeDetail(snapshot, tail[1]);
+  if (section === "paths" && arg) return json(res, executionPath(snapshot, arg));
+  if (section === "nodes" && arg) {
+    const detail = nodeDetail(snapshot, arg);
     return detail ? json(res, detail) : json(res, { error: "node not found" }, 404);
   }
   if (section === "search") return json(res, { results: params.get("q") ? searchNodes(snapshot, params.get("q")!.trim()) : [] });

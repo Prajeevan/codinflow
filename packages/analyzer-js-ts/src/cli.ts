@@ -10,6 +10,7 @@ import { analyzeRepository } from "./extract.js";
 import { cacheDir, detectChanges, hasDrift, readCache, writeCache, type Changes } from "./cache.js";
 import { buildReport, findSymbols, parseOutputs, stalenessFor } from "./query.js";
 import { openBrowser, startLocalServer } from "./local-server.js";
+import { SKILL_MD } from "./skill.js";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -37,6 +38,7 @@ codinflow — analyze a JavaScript/TypeScript repository into a behaviour graph
   codinflow --ui [path]                                open the visual canvas locally (no token)
   codinflow status [path]                              is the cached graph still current?
   codinflow query --fn <name> [path] [options]         what calls / is-used-by a function
+  codinflow skill [install]                            print (or install) the AI agent skill
 
 Analyze options
   --repository-id <id>   Name it in the UI (default: folder or repo name)
@@ -66,7 +68,7 @@ if (values.help) {
   process.exit(0);
 }
 
-const VERBS = new Set(["analyze", "status", "query", "ui"]);
+const VERBS = new Set(["analyze", "status", "query", "ui", "skill", "skills"]);
 const hasVerb = positionals[0] !== undefined && VERBS.has(positionals[0]);
 const verb = hasVerb ? positionals[0]! : "analyze";
 const operands = hasVerb ? positionals.slice(1) : positionals;
@@ -78,7 +80,8 @@ const operands = hasVerb ? positionals.slice(1) : positionals;
  */
 const invocationDir = process.env.INIT_CWD ?? process.cwd();
 
-if (verb === "ui" || values.ui) await runUi();
+if (verb === "skill" || verb === "skills") runSkill();
+else if (verb === "ui" || values.ui) await runUi();
 else if (verb === "status") await runStatus();
 else if (verb === "query") await runQuery();
 else await runAnalyze();
@@ -230,6 +233,20 @@ async function runQuery(): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
+/** Print the AI agent skill, or install it into ./.claude/skills/codinflow. */
+function runSkill(): void {
+  if (operands[0] === "install") {
+    const dest = path.resolve(invocationDir, operands[1] ?? ".", ".claude", "skills", "codinflow");
+    mkdirSync(dest, { recursive: true });
+    const file = path.join(dest, "SKILL.md");
+    writeFileSync(file, SKILL_MD);
+    console.error(`Installed the codinflow skill → ${file}`);
+    console.error(`Agents (Claude Code, etc.) that read .claude/skills will now know how to use codinflow.`);
+    return;
+  }
+  process.stdout.write(SKILL_MD);
+}
+
 async function runUi(): Promise<void> {
   const { dir: rootDir, cloned } = cloneIfRemote(operands[0] ?? ".");
   if (!existsSync(rootDir)) fail(`no such directory: ${rootDir}`);
@@ -373,23 +390,22 @@ function analyzeGuidance(snapshot: GraphSnapshot, where: string, cached: boolean
     lines.push(`  Exported symbols (${exported.length}): ${exported.slice(0, 8).join(", ")}${exported.length > 8 ? "…" : ""}`, ``);
   }
 
+  lines.push(
+    `  See it visually (opens a local canvas in your browser — no account, no upload):`,
+    `    codinflow --ui ${where}`,
+    ``,
+  );
+
   if (cached) {
     lines.push(
-      `  Explore it (graph cached in ${where}/.codinflow):`,
+      `  Or explore from the terminal (graph cached in ${where}/.codinflow):`,
       `    codinflow query --fn <name> ${where}     who calls / imports a function`,
       `    codinflow status ${where}                 has the code changed since?`,
       ``,
     );
   }
 
-  lines.push(
-    `  See it in the visual app (needs an ingest token):`,
-    `    codinflow ${where} --api https://codinflow-api.software-93f.workers.dev --token $CODINFLOW_TOKEN`,
-    `    then open https://codinflow.software-93f.workers.dev`,
-    ``,
-    `  Save or pipe the raw graph:  codinflow ${where} --out graph.json   ·   codinflow ${where} --json`,
-    ``,
-  );
+  lines.push(`  Save or pipe the raw graph:  codinflow ${where} --out graph.json   ·   codinflow ${where} --json`, ``);
 
   return lines.join("\n");
 }
