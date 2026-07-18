@@ -145,12 +145,6 @@ apps/web                  React Flow + ELK canvas (embedded in the CLI; also the
 fixtures/                 known-behaviour repos the golden tests analyze
 ```
 
-Publish the CLI (no Cloudflare involved):
-
-```bash
-pnpm publish:cli          # add `-- --otp=123456` if npm asks for 2FA
-```
-
 ## Optional: self-hosted team canvas
 
 Everything above is local. If you want a shared canvas where a team browses graphs
