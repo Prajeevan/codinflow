@@ -21,9 +21,9 @@ compiler into a behaviour graph, then answers structural questions precisely:
 it is alias-aware and distinguishes a definition from a call from a type
 reference — things a text search cannot.
 
-> This file is embedded in the \`codinflow\` npm package. Regenerate it any time
-> with \`npx codinflow skill > SKILL.md\`, or install it with
-> \`npx codinflow skill install\`.
+> Install this skill with \`npx skills add Prajeevan/codinflow\` (via skills.sh)
+> or \`npx codinflow skill install\`. It is embedded in the \`codinflow\` npm
+> package; regenerate it any time with \`npx codinflow skill > SKILL.md\`.
 
 ## When to use this (and when not to)
 

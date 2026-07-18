@@ -32,12 +32,21 @@ answer.
 
 ## Give your agent the tools
 
+Install the skill so your agent knows the verbs and when to reach for them:
+
 ```bash
-npx codinflow skill install    # writes .claude/skills/codinflow — Claude Code learns the verbs
+npx skills add Prajeevan/codinflow   # via skills.sh — Claude Code, Cursor, Cline, Copilot, …
+# or, if you already have the CLI:
+npx codinflow skill install          # writes .claude/skills/codinflow directly
+```
+
+Then point it at a repo and let it work:
+
+```bash
 npx codinflow .                # analyze the current repo (caches a graph in .codinflow/)
 ```
 
-Then, in any analyzed repo, the agent (or you) asks:
+In any analyzed repo, the agent (or you) asks:
 
 ```bash
 npx codinflow map .                       # orient: routes, hotspot files, boundaries, env vars — one screen, not 20 file reads

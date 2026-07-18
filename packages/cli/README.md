@@ -11,8 +11,9 @@ Entirely local: no install, no account, no server.
 ## Give your agent the tools
 
 ```bash
-npx codinflow skill install    # writes .claude/skills/codinflow — Claude Code learns the verbs
-npx codinflow .                # analyze the current repo (caches a graph in .codinflow/)
+npx skills add Prajeevan/codinflow   # via skills.sh — Claude Code, Cursor, Cline, Copilot, …
+npx codinflow skill install          # or install the skill directly if you have the CLI
+npx codinflow .                      # analyze the current repo (caches a graph in .codinflow/)
 ```
 
 ## See it as a visual map (for humans)
