@@ -22,7 +22,9 @@ if (!skipWeb) {
 }
 
 // 2. Bundle the CLI (and its workspace deps) into one file. `typescript` stays
-//    external — it is a declared runtime dependency.
+//    external — it is a declared runtime dependency. The package version is baked
+//    in so `codinflow --version` reports the real published version.
+const cliVersion = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
 await build({
   entryPoints: [path.join(pkgDir, "..", "analyzer-js-ts", "src", "cli.ts")],
   bundle: true,
@@ -31,6 +33,7 @@ await build({
   format: "esm",
   outfile: path.join(pkgDir, "dist", "cli.js"),
   external: ["typescript"],
+  define: { __CODINFLOW_CLI_VERSION__: JSON.stringify(cliVersion) },
   logLevel: "info",
 });
 

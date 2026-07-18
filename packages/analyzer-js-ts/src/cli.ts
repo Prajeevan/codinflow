@@ -15,6 +15,7 @@ import { buildTrace, findRouteNodes } from "./trace.js";
 import { c, humanAge, printDescribe, printImpact, printMap, printStaleness, printTrace } from "./render.js";
 import { openBrowser, startLocalServer } from "./local-server.js";
 import { SKILL_MD } from "./skill.js";
+import { CLI_VERSION } from "./version.js";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -35,6 +36,7 @@ const { values, positionals } = parseArgs({
     ui: { type: "boolean" },
     port: { type: "string" },
     help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
   },
 });
 
@@ -50,6 +52,7 @@ codinflow — analyze a JavaScript/TypeScript repository into a behaviour graph
   codinflow trace <route> [path]                       what runs when a route is hit, in order
   codinflow status [path]                              is the cached graph still current?
   codinflow skill [install]                            print (or install) the AI agent skill
+  codinflow --version                                  print the installed codinflow version
 
 Analyze options
   --repository-id <id>   Name it in the UI (default: folder or repo name)
@@ -80,12 +83,17 @@ Examples
   codinflow trace "POST /api/orders" ./my-app
 `;
 
+if (values.version) {
+  console.log(CLI_VERSION);
+  process.exit(0);
+}
+
 if (values.help) {
   console.log(USAGE);
   process.exit(0);
 }
 
-const VERBS = new Set(["analyze", "status", "query", "map", "impact", "describe", "trace", "ui", "skill", "skills"]);
+const VERBS = new Set(["analyze", "status", "query", "map", "impact", "describe", "trace", "ui", "skill", "skills", "version"]);
 const hasVerb = positionals[0] !== undefined && VERBS.has(positionals[0]);
 const verb = hasVerb ? positionals[0]! : "analyze";
 const operands = hasVerb ? positionals.slice(1) : positionals;
@@ -97,7 +105,8 @@ const operands = hasVerb ? positionals.slice(1) : positionals;
  */
 const invocationDir = process.env.INIT_CWD ?? process.cwd();
 
-if (verb === "skill" || verb === "skills") runSkill();
+if (verb === "version") console.log(CLI_VERSION);
+else if (verb === "skill" || verb === "skills") runSkill();
 else if (verb === "ui" || values.ui) await runUi();
 else if (verb === "status") await runStatus();
 else if (verb === "query") await runQuery();
