@@ -484,16 +484,17 @@ function printQueryHuman(fn: string, reports: ReturnType<typeof buildReport>[], 
 
     const callerLabel = (caller: { name: string; line?: number; guard?: string }): string =>
       `${caller.name}${caller.line ? `:${caller.line}` : ""}${caller.guard ? ` ${c.magenta(caller.guard)}` : ""}`;
-    if (report.importedBy?.length) {
-      console.error(`\n  Imported by (${report.importedBy.length} file${report.importedBy.length === 1 ? "" : "s"}):`);
-      for (const group of report.importedBy) {
-        console.error(`    ${group.file} — ${group.callers.map(callerLabel).join(", ")}`);
-      }
-    } else if (report.usedBy?.length) {
+    // usedBy is the precise "who calls or renders this"; importedBy is the
+    // coarser "which files import this file". Lead with the precise one.
+    if (report.usedBy?.length) {
       console.error(`\n  Used by (${report.usedBy.length} file${report.usedBy.length === 1 ? "" : "s"}):`);
       for (const group of report.usedBy) {
         console.error(`    ${group.file} — ${group.callers.map(callerLabel).join(", ")}`);
       }
+    }
+    if (report.importedBy?.length) {
+      console.error(`\n  Imported by (${report.importedBy.length} file${report.importedBy.length === 1 ? "" : "s"}, file-level):`);
+      for (const group of report.importedBy) console.error(`    ${group.file}`);
     }
 
     if (report.calls?.length) {

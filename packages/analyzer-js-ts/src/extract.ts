@@ -545,6 +545,10 @@ function extractRelationships(
       }
     }
 
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      extractJsxRender(context, node, fileId, language);
+    }
+
     if (ts.isThrowStatement(node)) {
       extractThrow(context, node, language);
     }
@@ -778,6 +782,45 @@ function extractCall(context: AnalysisContext, node: ts.CallExpression, fileId: 
   });
 
   return true;
+}
+
+/**
+ * A rendered JSX element (`<Foo/>`, `<Foo.Bar/>`) is a use of a component, every
+ * bit as real as a call — the enclosing component depends on it, and it is used
+ * by the enclosing component. We model it as a `calls` edge (tagged
+ * `render`) so it flows through the same caller/callee, impact and blast-radius
+ * logic as a function call, rather than inventing a second edge kind that
+ * nothing downstream would walk.
+ *
+ * Only component tags can resolve to a declared symbol: an uppercase identifier
+ * or a member expression. Lowercase intrinsics (`div`, `span`) and third-party
+ * components resolve to no application symbol and are skipped.
+ */
+function extractJsxRender(
+  context: AnalysisContext,
+  node: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+  fileId: string,
+  language: Language,
+): void {
+  const tagName = node.tagName;
+  const tagText = tagName.getText(node.getSourceFile());
+  if (/^[a-z]/.test(tagText)) return;
+
+  const targetId = resolveDeclarationId(context, tagName as ts.Expression);
+  if (!targetId) return;
+
+  const callerId = enclosingSymbolId(context, node) ?? fileId;
+
+  context.addEdge({
+    sourceNodeId: callerId,
+    targetNodeId: targetId,
+    kind: "calls",
+    label: `renders <${tagText}/>`,
+    analysisConfidence: 1,
+    provenance: context.provenance("semantic", language),
+    sourceLocation: locationOf(context, node),
+    metadata: { render: true },
+  });
 }
 
 /**

@@ -154,17 +154,23 @@ export function printDescribe(report: SymbolReport): void {
   if (traits.length) out(`  ${c.dim("traits")}     ${c.magenta(traits.join(" · "))}`);
   out(`  ${c.dim("summary")}    ${s.description}`);
 
-  const callerGroups = report.usedBy ?? report.importedBy ?? [];
-  if (callerGroups.length > 0) {
+  // usedBy is the precise "who calls or renders this" (includes JSX renders);
+  // importedBy is the coarser file-import relationship.
+  if (report.usedBy?.length) {
     out();
-    out(`  ${c.bold("Called from")} ${c.dim(`(${callerGroups.length} file${callerGroups.length === 1 ? "" : "s"})`)}`);
-    for (const group of callerGroups) {
+    out(`  ${c.bold("Used by")} ${c.dim(`(${report.usedBy.length} file${report.usedBy.length === 1 ? "" : "s"})`)}`);
+    for (const group of report.usedBy) {
       out(`    ${group.file}`);
       for (const caller of group.callers) {
         const guard = caller.guard ? ` ${c.magenta(caller.guard)}` : "";
         out(`      ${caller.name}${caller.line ? c.dim(`:${caller.line}`) : ""}${guard}`);
       }
     }
+  }
+  if (report.importedBy?.length) {
+    out();
+    out(`  ${c.bold("Imported by")} ${c.dim(`(${report.importedBy.length} file${report.importedBy.length === 1 ? "" : "s"}, file-level)`)}`);
+    for (const group of report.importedBy) out(`    ${group.file}`);
   }
 
   if (report.calls?.length) {

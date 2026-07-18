@@ -131,14 +131,23 @@ export function buildReport(snapshot: GraphSnapshot, node: GraphNode, outputs: O
       });
   }
 
-  if (want.has("usedBy") || want.has("importedBy")) {
+  // usedBy is the precise, symbol-level answer: who actually calls or renders
+  // this. It now includes JSX renders, since those are `calls` edges.
+  if (want.has("usedBy")) {
     const callers = incoming.filter((edge) => CALLER_EDGES.has(edge.kind));
     const grouped = groupByFile(callers, byId);
     for (const group of grouped) relevant.add(group.file);
-    if (want.has("usedBy")) report.usedBy = grouped;
-    // "Imported by" is the same call sites, framed for an export: any file that
-    // calls an exported symbol must import it.
-    if (want.has("importedBy")) report.importedBy = grouped;
+    report.usedBy = grouped;
+  }
+
+  // importedBy is the coarser, file-level relationship: which files import the
+  // file this symbol lives in. It is deliberately the same set as
+  // `impact.importers` (both are `imports` edges), so the two commands agree —
+  // and it can differ from usedBy (a file may import a module without touching
+  // this particular export, or use it without a direct import edge).
+  if (want.has("importedBy")) {
+    report.importedBy = importersOfFile(snapshot, node.filePath);
+    for (const group of report.importedBy) relevant.add(group.file);
   }
 
   if (want.has("reads")) report.reads = refs(outgoing.filter((e) => e.kind === "reads"), byId);
@@ -190,6 +199,27 @@ export function stalenessFor(
     removed: changes.removed,
     affectedFiles,
   };
+}
+
+/**
+ * Files whose file node imports the file this symbol lives in. Same edge set as
+ * `impact`'s importers, so `describe`/`query` and `impact` never disagree.
+ */
+function importersOfFile(snapshot: GraphSnapshot, filePath: string | undefined): FileGroup[] {
+  if (!filePath) return [];
+  const byId = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const fileNodeIds = new Set(
+    snapshot.nodes.filter((n) => n.kind === "file" && n.filePath === filePath).map((n) => n.id),
+  );
+  if (fileNodeIds.size === 0) return [];
+
+  const files = new Set<string>();
+  for (const edge of snapshot.edges) {
+    if (edge.kind !== "imports" || !fileNodeIds.has(edge.targetNodeId)) continue;
+    const importer = byId.get(edge.sourceNodeId)?.filePath;
+    if (importer) files.add(importer);
+  }
+  return [...files].sort().map((file) => ({ file, callers: [] }));
 }
 
 function groupByFile(edges: GraphEdge[], byId: Map<string, GraphNode>): FileGroup[] {
