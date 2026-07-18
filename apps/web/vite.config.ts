@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "https://codinflow-api.software-93f.workers.dev",
+        // Your CodinFlow API — a local `wrangler dev` by default; set
+        // CODINFLOW_API to develop against a deployed instance.
+        target: process.env.CODINFLOW_API ?? "http://127.0.0.1:8787",
         changeOrigin: true,
       },
     },

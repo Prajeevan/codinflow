@@ -583,7 +583,7 @@ function ConnectHelp() {
       <p className="muted">Analyze a local folder or a public GitHub repository, then reload this page.</p>
       <pre>
         {`# from the CodinFlow checkout
-export CODINFLOW_API=https://codinflow-api.software-93f.workers.dev
+export CODINFLOW_API=<your CodinFlow API URL>
 export CODINFLOW_TOKEN=<your ingest token>
 
 # a local folder

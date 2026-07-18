@@ -22,8 +22,7 @@ app.get("/api/health", (c) => c.json({ ok: true, service: "codinflow-api" }));
 app.get("/", (c) =>
   c.json({
     service: "codinflow-api",
-    description: "Graph data backend for CodinFlow. The visual app is at the app URL below.",
-    app: "https://codinflow.software-93f.workers.dev",
+    description: "Graph data backend for CodinFlow. Pair it with the CodinFlow web app.",
     endpoints: {
       health: "/api/health",
       repositories: "/api/v1/repositories",
