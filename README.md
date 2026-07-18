@@ -70,17 +70,24 @@ Express repo → TS Compiler API analyzer → language-neutral graph
 
 ## What is not built
 
-Stated plainly, because a map you cannot trust is worse than no map:
+Stated plainly, because a map you cannot trust is worse than no map.
 
-- **No authentication and no tenant isolation enforcement.** The API is public and
-  serves a fixture. Do not point it at private source.
-- **No GitHub App, webhook, or PR check.** Snapshots are ingested via `PUT`.
-- **No repository fetching**, so no archive-traversal or symlink defences yet.
-- **No AI summaries.** The redaction and injection-defence layer exists; no model
-  is wired in. Summaries today are deterministic and fact-derived.
-- **No Sandbox/Container.** The analyzer runs in Node (ADR-004).
-- **No Vectorize, Queues, Workflows, or Durable Objects.** Not needed by the slice.
-- **Not benchmarked above ~300 nodes** with our custom nodes.
+The **CLI** (`npx codinflow`, including `--ui`) is entirely local — it parses
+your code, writes a cache under `.codinflow/`, and serves the viewer from your
+own machine. No account, no network, nothing to secure. What it doesn't do yet:
+
+- **No AI summaries.** Summaries are deterministic and fact-derived. The
+  redaction and prompt-injection-defence layer exists; no model is wired in.
+- **Not benchmarked above ~300 nodes** in the canvas with our custom node type.
+
+The optional **self-hosted server** (`workers/api` + `apps/web`) is a team-canvas
+experiment, not a hardened product. If you deploy it, treat it as such:
+
+- **No authentication or tenant isolation.** The ingest endpoint is guarded only
+  by a bearer token; anyone who reaches the API can read every stored graph.
+  Don't expose it publicly or point it at private source you can't share.
+- **No GitHub App, webhook, or PR check**, and **no repository fetching** by the
+  server — snapshots are pushed to it via `PUT` by the CLI.
 
 ## Layout
 
