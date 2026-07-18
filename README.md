@@ -1,79 +1,82 @@
 # CodinFlow
 
-Turn any JavaScript/TypeScript repo into a **visual, human-readable map of how the
-code actually behaves** — routes, functions, data stores, external calls, and how
-they connect — extracted with the TypeScript compiler, so it's real types and
-resolved calls, not text matching.
+**Code intelligence for Claude Code and AI agents.** Point it at a JS/TS repo and
+ask precise questions — who calls this, what breaks if I change it, what runs when
+this route is hit — and get answers grep can't give, because they come from the
+TypeScript compiler's resolved call graph, not text matching.
 
-It's a single CLI. Point it at a folder, get a local visual canvas or precise
-answers in your terminal. No install, no account, no server.
+One CLI, entirely local: no install, no account, no server. Humans get the same
+graph as a visual map (`--ui`); agents get it as JSON, plus a `staleness` verdict
+on every answer.
 
-```bash
-npx codinflow --ui        # analyze the current folder and open the map in your browser
+## grep floods, codinflow answers
+
+```text
+$ grep -rn getRouter src/           40 hits — comments, a type import, an unrelated
+                                    getRouterConfig, three aliased re-exports…
+
+$ codinflow query --fn getRouter .  the ONE function that calls it, the file that
+                                    imports it, and the guard it sits behind
 ```
 
-That's the whole setup. It parses your code, caches a graph in `.codinflow/`, and
-opens a local viewer — everything stays on your machine.
+grep finds a *string*; codinflow answers the *question*. It's alias-aware and tells
+a definition from a call from a type reference — so an agent gets one correct answer
+instead of a page of matches to read and rule out. That's what actually saves an
+agent time: **fewer file reads, fewer wrong turns, fewer tokens** to a *correct*
+answer.
 
----
+> It won't out-race ripgrep to a raw string match — a full-repo compile is slower
+> than grep. It's faster to the *answer*, not to a match. Use grep to find a
+> string; use codinflow to learn who really calls/imports a symbol and what it
+> touches. They're complementary.
 
-## See the map
+## Give your agent the tools
 
 ```bash
-npx codinflow --ui              # the current folder
+npx codinflow skill install    # writes .claude/skills/codinflow — Claude Code learns the verbs
+npx codinflow .                # analyze the current repo (caches a graph in .codinflow/)
+```
+
+Then, in any analyzed repo, the agent (or you) asks:
+
+```bash
+npx codinflow map .                       # orient: routes, hotspot files, boundaries, env vars — one screen, not 20 file reads
+npx codinflow query --fn getRouter .      # who calls/imports it, and behind which guards
+npx codinflow describe createOrder .      # one symbol's full story: callers, callees, reads/writes/throws
+npx codinflow impact getRouter .          # blast radius: transitive callers → routes, importers, tests — run before a refactor
+npx codinflow trace "POST /api/orders" .  # what runs when a route is hit: middleware order, guarded call tree, db/external touches
+```
+
+Every verb takes `--json`. Every answer is type-resolved and carries a **staleness
+verdict** — `fresh` / `stale-unaffected` / `stale-affected` — computed against the
+working tree, so an agent knows when a cached answer is still true and when to
+re-analyze. That's the part a raw AST dump can't do: an answer that tells you when
+it has gone stale. `--refresh` re-analyzes first when you want a guaranteed-current
+result.
+
+Full flags: `npx codinflow --help`, or see [`packages/cli`](packages/cli).
+
+## A visual map for humans
+
+The same graph, for the human on the team:
+
+```bash
+npx codinflow --ui              # analyze the current folder and open the map in your browser
 npx codinflow --ui ./my-app     # some other folder
 ```
 
-Opens a local canvas (`http://127.0.0.1:9338`) showing files as containers of their
+Opens a local canvas (`http://127.0.0.1:9338`): files as containers of their
 functions and classes, routes with their handlers, data stores and external
-services, and how it all connects — with semantic zoom, search, and click-through
-to the real source. No upload, no token. Re-running reuses the cache when your code
-hasn't changed. `Ctrl+C` to stop.
+services, semantic zoom, search, and click-through to the real source. No upload,
+no token, everything on your machine. `Ctrl+C` to stop.
 
-## Ask the codebase questions
-
-Once a folder is analyzed, every verb answers a structural question. All are
-type-resolved, guard-aware, and carry a **staleness verdict** so an answer is never
-silently out of date:
-
-```bash
-npx codinflow map .                       # orient: routes, hotspot files, boundaries, env vars
-npx codinflow query --fn getRouter .      # who calls/imports it, and behind which guards
-npx codinflow describe createOrder .      # one symbol's full story: callers, callees, reads/writes/throws
-npx codinflow impact getRouter .          # blast radius: transitive callers → routes, importers, tests
-npx codinflow trace "POST /api/orders" .  # middleware order + guarded call tree + db/external touches
-npx codinflow status .                    # has the code changed since the graph was built?
-```
-
-`codinflow map` is the fast way into an unfamiliar repo — one screen instead of
-twenty file reads. `impact` is what you run before a rename or refactor.
-
-You can also skip the cache and just get the graph:
+You can also just take the raw graph:
 
 ```bash
 npx codinflow ./my-app --out graph.json   # write the full graph as JSON
 bunx codinflow honojs/hono --out g.json    # a public GitHub repo (shallow clone, parse only)
 npx codinflow . --json | jq .stats         # pipe it anywhere
 ```
-
-Full flags: `npx codinflow --help`, or see [`packages/cli`](packages/cli).
-
-## For AI agents
-
-The same verbs are how an agent navigates code without burning its context window
-grepping. Every verb takes `--json`, and one command installs a skill that teaches
-Claude Code (and compatible agents) the whole flow:
-
-```bash
-npx codinflow skill install     # writes .claude/skills/codinflow
-```
-
-The agent then uses `map` to orient, `describe`/`query` while reading, `impact`
-before editing, and `trace` when debugging an endpoint — each answer type-resolved
-and marked **fresh / stale-unaffected / stale-affected** against the working tree,
-so it knows when to re-analyze. It's complementary to grep, not a replacement: use
-grep to find a string, codinflow to learn who really calls/imports a symbol and what
-it touches.
 
 ## What it extracts
 

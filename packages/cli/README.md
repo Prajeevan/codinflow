@@ -1,10 +1,21 @@
 # codinflow
 
-Turn any JavaScript/TypeScript repository into a visual, human-readable map of
-application behaviour — routes, functions, data stores, external calls and how
-they connect — extracted with the TypeScript compiler (real types, not guesses).
+**Code intelligence for Claude Code and AI agents.** Ask a JS/TS repo precise
+questions — who calls this, what breaks if I change it, what runs when this route
+is hit — and get answers from the TypeScript compiler's resolved call graph, not a
+text search. grep floods an agent with 40 ambiguous matches; codinflow returns the
+one correct, type-resolved answer, so it gets there in fewer reads and fewer tokens.
 
-## See it (no install, no account)
+Entirely local: no install, no account, no server.
+
+## Give your agent the tools
+
+```bash
+npx codinflow skill install    # writes .claude/skills/codinflow — Claude Code learns the verbs
+npx codinflow .                # analyze the current repo (caches a graph in .codinflow/)
+```
+
+## See it as a visual map (for humans)
 
 ```bash
 npx codinflow --ui          # analyze the current folder and open the visual canvas
