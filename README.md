@@ -3,24 +3,33 @@
 Turn every repository and commit into a visual, human-readable map of application
 behaviour.
 
-**Live:** https://codinflow.software-93f.workers.dev
-**API:** https://codinflow-api.software-93f.workers.dev
-
 ---
 
-## CLI — analyze any repo (no install)
+## CLI — analyze any repo (no install, no account)
 
 The analyzer ships as the [`codinflow`](https://www.npmjs.com/package/codinflow)
 package. Run it with your package manager's runner:
 
 ```bash
-npx codinflow ./my-app --out graph.json        # local folder
+npx codinflow --ui ./my-app                    # open the visual canvas locally
+npx codinflow ./my-app --out graph.json        # local folder → graph JSON
 bunx codinflow honojs/hono --out hono.json      # a public GitHub repo
-pnpm dlx codinflow ./my-app \                    # upload to the hosted canvas
-  --api https://codinflow-api.software-93f.workers.dev --token "$CODINFLOW_TOKEN"
 ```
 
-Full flags: `npx codinflow --help`, or see [`packages/cli`](packages/cli).
+Once a repo is analyzed (the graph is cached in `.codinflow/`), ask it questions
+— every answer is type-resolved, guard-aware, and carries a staleness verdict:
+
+```bash
+npx codinflow map .                     # orientation: routes, hotspot files, boundaries
+npx codinflow query --fn getRouter .    # who calls/imports it, and behind which guards
+npx codinflow describe createOrder .    # one symbol's full story: callers, callees, reads/writes/throws
+npx codinflow impact getRouter .        # blast radius: transitive callers → routes, importers, tests
+npx codinflow trace "POST /api/orders" .  # middleware order + guarded call tree + db/external touches
+```
+
+All verbs take `--json` for agents; `npx codinflow skill install` teaches
+Claude Code (and friends) how to use them. Full flags: `npx codinflow --help`,
+or see [`packages/cli`](packages/cli).
 
 ---
 
@@ -86,12 +95,14 @@ fixtures/express-api-v2   the same app after a behavioural change ("after")
 docs/                     architecture decisions, security, business plan
 ```
 
-## Connect a repository
+## Connect a repository (self-hosted stack)
 
-Analyze a local folder or a public GitHub repository and push it to the app:
+For local, single-repo viewing you never need a server — `codinflow --ui` does
+it all. If you deploy your own API + web app (see below), you can push
+snapshots to it so a whole team browses them:
 
 ```bash
-export CODINFLOW_API=https://codinflow-api.software-93f.workers.dev
+export CODINFLOW_API=<your API URL>
 export CODINFLOW_TOKEN=<ingest token>   # workers/api/.dev.vars
 
 pnpm codinflow ~/code/my-app            # a local folder
@@ -107,9 +118,10 @@ repo before and after a change gives you two snapshots to compare under
 
 ```bash
 pnpm install
-pnpm test                 # 24 golden tests against the Express fixture
+pnpm test                 # golden tests across the workspace (Express fixture + verbs)
 pnpm run analyze:fixture  # → artifacts/express-api.graph.json
-pnpm dev:web              # canvas against the deployed API
+pnpm dev:api              # local API worker (wrangler dev)
+pnpm dev:web              # canvas, proxied to the local API (or set CODINFLOW_API)
 ```
 
 Analyze any JS/TS repository:

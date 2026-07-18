@@ -8,7 +8,11 @@ import { parseArgs } from "node:util";
 import type { GraphSnapshot } from "@codinflow/graph-schema";
 import { analyzeRepository } from "./extract.js";
 import { cacheDir, detectChanges, hasDrift, readCache, writeCache, type Changes } from "./cache.js";
-import { buildReport, findSymbols, parseOutputs, stalenessFor } from "./query.js";
+import { buildReport, findSymbols, parseOutputs, stalenessFor, type OutputKind } from "./query.js";
+import { buildMap, mapRelevantFiles } from "./map.js";
+import { buildImpact } from "./impact.js";
+import { buildTrace, findRouteNodes } from "./trace.js";
+import { c, humanAge, printDescribe, printImpact, printMap, printStaleness, printTrace } from "./render.js";
 import { openBrowser, startLocalServer } from "./local-server.js";
 import { SKILL_MD } from "./skill.js";
 
@@ -22,6 +26,9 @@ const { values, positionals } = parseArgs({
     token: { type: "string" },
     branch: { type: "string" },
     fn: { type: "string" },
+    file: { type: "string" },
+    route: { type: "string" },
+    depth: { type: "string" },
     output: { type: "string" },
     json: { type: "boolean" },
     refresh: { type: "boolean" },
@@ -36,8 +43,12 @@ codinflow — analyze a JavaScript/TypeScript repository into a behaviour graph
 
   codinflow [analyze] <path-or-github-url> [options]   analyze a repo
   codinflow --ui [path]                                open the visual canvas locally (no token)
-  codinflow status [path]                              is the cached graph still current?
+  codinflow map [path]                                 one-screen orientation: routes, hotspots, boundaries
   codinflow query --fn <name> [path] [options]         what calls / is-used-by a function
+  codinflow describe <name> [path]                     everything known about a symbol, in prose
+  codinflow impact <name|--file f> [path]              blast radius: who breaks if this changes
+  codinflow trace <route> [path]                       what runs when a route is hit, in order
+  codinflow status [path]                              is the cached graph still current?
   codinflow skill [install]                            print (or install) the AI agent skill
 
 Analyze options
@@ -50,17 +61,23 @@ Analyze options
 
 Query options
   --fn <name>            Function/method/class to inspect (a trailing () is fine)
+  --file <path>          For impact: a file instead of a symbol
+  --route <route>        For trace: "GET /api/orders", a path, or a fragment
+  --depth <n>            Max walk depth for impact (default 12) / trace (default 8)
   --output <list>        Comma list: calls,usedBy,importedBy,reads,writes,throws,external
   --refresh              Re-analyze before answering (guarantees a fresh result)
-  --json                 Machine-readable output (for status and query)
+  --json                 Machine-readable output (all query verbs)
 
-Analyze caches a warm graph in <path>/.codinflow. status and query read it and
-report how stale it is versus the working tree, so an answer is never silently old.
+Analyze caches a warm graph in <path>/.codinflow. Every other verb reads it and
+reports how stale it is versus the working tree, so an answer is never silently old.
 
 Examples
   codinflow analyze ./my-app
-  codinflow status ./my-app
+  codinflow map ./my-app
   codinflow query --fn getRouter --output importedBy,usedBy,calls --json ./my-app
+  codinflow describe createOrder ./my-app
+  codinflow impact getRouter ./my-app
+  codinflow trace "POST /api/orders" ./my-app
 `;
 
 if (values.help) {
@@ -68,7 +85,7 @@ if (values.help) {
   process.exit(0);
 }
 
-const VERBS = new Set(["analyze", "status", "query", "ui", "skill", "skills"]);
+const VERBS = new Set(["analyze", "status", "query", "map", "impact", "describe", "trace", "ui", "skill", "skills"]);
 const hasVerb = positionals[0] !== undefined && VERBS.has(positionals[0]);
 const verb = hasVerb ? positionals[0]! : "analyze";
 const operands = hasVerb ? positionals.slice(1) : positionals;
@@ -84,6 +101,10 @@ if (verb === "skill" || verb === "skills") runSkill();
 else if (verb === "ui" || values.ui) await runUi();
 else if (verb === "status") await runStatus();
 else if (verb === "query") await runQuery();
+else if (verb === "map") await runMap();
+else if (verb === "impact") await runImpact();
+else if (verb === "describe") await runDescribe();
+else if (verb === "trace") await runTrace();
 else await runAnalyze();
 
 // ---------------------------------------------------------------------------
@@ -197,26 +218,7 @@ async function runQuery(): Promise<void> {
 
   const rootDir = path.resolve(invocationDir, operands[0] ?? ".");
   const outputs = parseOutputs(values.output);
-
-  let snapshot: GraphSnapshot;
-  let changes: Changes;
-
-  if (values.refresh) {
-    if (!existsSync(rootDir)) fail(`no such directory: ${rootDir}`);
-    const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
-    const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
-    console.error(`refreshing graph for ${rootDir}…`);
-    snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
-    writeCache(rootDir, snapshot);
-    changes = { changed: [], added: [], removed: [] };
-  } else {
-    const cached = readCache(rootDir);
-    if (!cached) {
-      fail(`no cached graph in ${cacheDir(rootDir)}. Run: codinflow analyze ${operands[0] ?? "."} (or pass --refresh)`);
-    }
-    snapshot = cached.snapshot;
-    changes = detectChanges(rootDir, cached.manifest);
-  }
+  const { snapshot, changes } = loadGraph(rootDir);
 
   const matches = findSymbols(snapshot, values.fn);
   const reports = matches.map((node) => buildReport(snapshot, node, outputs));
@@ -229,6 +231,126 @@ async function runQuery(): Promise<void> {
   }
 
   printQueryHuman(values.fn, reports, staleness);
+}
+
+/**
+ * Verbs that take both a name and a path accept `codinflow impact getRouter ./repo`:
+ * an operand that is not an existing directory is the name; the rest is the path.
+ */
+function nameAndDir(flagValue: string | undefined): { name?: string; dir: string } {
+  const ops = [...operands];
+  let name = flagValue;
+  if (name === undefined && ops[0] !== undefined && !existsSync(path.resolve(invocationDir, ops[0]))) {
+    name = ops.shift();
+  }
+  return { name, dir: path.resolve(invocationDir, ops[0] ?? ".") };
+}
+
+async function runMap(): Promise<void> {
+  const rootDir = path.resolve(invocationDir, operands[0] ?? ".");
+  const { snapshot, changes } = loadGraph(rootDir);
+  const map = buildMap(snapshot);
+  const staleness = stalenessFor(changes, snapshot.generatedAt, Date.now(), mapRelevantFiles(map));
+
+  if (values.json) {
+    printJson({ staleness, map });
+    return;
+  }
+  printStaleness(staleness);
+  printMap(map);
+}
+
+async function runImpact(): Promise<void> {
+  const { name, dir: rootDir } = nameAndDir(values.fn);
+  if (!name && !values.file) {
+    fail(`impact needs a symbol or file. Examples:\n  codinflow impact getRouter ./my-app\n  codinflow impact --file src/router.ts ./my-app`);
+  }
+  const { snapshot, changes } = loadGraph(rootDir);
+  const depth = values.depth ? Number(values.depth) : 12;
+
+  const targets = values.file
+    ? snapshot.nodes.filter((node) => node.kind === "file" && node.filePath === values.file)
+    : findSymbols(snapshot, name!);
+  if (targets.length === 0) {
+    fail(`nothing named "${values.file ?? name}" in the graph. (Stale? Try --refresh. A file needs its repo-relative path.)`);
+  }
+
+  const reports = targets.map((target) => buildImpact(snapshot, target, depth));
+  const relevantFiles = [...new Set(reports.flatMap((report) => report.relevantFiles))];
+  const staleness = stalenessFor(changes, snapshot.generatedAt, Date.now(), relevantFiles);
+
+  if (values.json) {
+    printJson({ query: { target: values.file ?? name, depth }, staleness, matchCount: reports.length, matches: reports });
+    return;
+  }
+  printStaleness(staleness);
+  for (const report of reports) printImpact(report);
+}
+
+async function runDescribe(): Promise<void> {
+  const { name, dir: rootDir } = nameAndDir(values.fn);
+  if (!name) fail("describe needs a symbol. Example: codinflow describe createOrder ./my-app");
+  const { snapshot, changes } = loadGraph(rootDir);
+
+  const allOutputs: OutputKind[] = ["calls", "usedBy", "importedBy", "reads", "writes", "throws", "external"];
+  const matches = findSymbols(snapshot, name);
+  if (matches.length === 0) fail(`no function/method/class named "${name}" in the graph. (Stale? Try --refresh.)`);
+
+  const reports = matches.map((node) => buildReport(snapshot, node, allOutputs));
+  const relevantFiles = [...new Set(reports.flatMap((report) => report.relevantFiles))];
+  const staleness = stalenessFor(changes, snapshot.generatedAt, Date.now(), relevantFiles);
+
+  if (values.json) {
+    printJson({ query: { fn: name }, staleness, matchCount: matches.length, matches: reports });
+    return;
+  }
+  printStaleness(staleness);
+  for (const report of reports) printDescribe(report);
+}
+
+async function runTrace(): Promise<void> {
+  const { name, dir: rootDir } = nameAndDir(values.route);
+  if (!name) fail(`trace needs a route. Examples:\n  codinflow trace "POST /api/orders" ./my-app\n  codinflow trace /health ./my-app`);
+  const { snapshot, changes } = loadGraph(rootDir);
+  const depth = values.depth ? Number(values.depth) : 8;
+
+  const routes = findRouteNodes(snapshot, name);
+  if (routes.length === 0) {
+    const known = snapshot.nodes.filter((node) => node.kind === "route").map((node) => node.name);
+    fail(
+      `no route matching "${name}".${known.length ? ` Known routes:\n  ${known.slice(0, 20).join("\n  ")}` : " The graph has no routes — is a supported framework in use?"}`,
+    );
+  }
+
+  const traces = routes.map((route) => buildTrace(snapshot, route, depth));
+  const relevantFiles = [...new Set(traces.flatMap((trace) => trace.relevantFiles))];
+  const staleness = stalenessFor(changes, snapshot.generatedAt, Date.now(), relevantFiles);
+
+  if (values.json) {
+    printJson({ query: { route: name, depth }, staleness, matchCount: traces.length, matches: traces });
+    return;
+  }
+  printStaleness(staleness);
+  for (const trace of traces) printTrace(trace);
+}
+
+/** Cached graph + drift for a repo, or a fresh re-analysis with --refresh. */
+function loadGraph(rootDir: string): { snapshot: GraphSnapshot; changes: Changes } {
+  if (values.refresh) {
+    if (!existsSync(rootDir)) fail(`no such directory: ${rootDir}`);
+    const repositoryId = values["repository-id"] ?? path.basename(rootDir).replace(/[^\w.-]/g, "-");
+    const commitSha = values["commit-sha"] ?? gitSha(rootDir) ?? "workdir";
+    console.error(`refreshing graph for ${rootDir}…`);
+    const snapshot = analyzeRepository({ rootDir, repositoryId, commitSha });
+    writeCache(rootDir, snapshot);
+    return { snapshot, changes: { changed: [], added: [], removed: [] } };
+  }
+
+  const cached = readCache(rootDir);
+  if (!cached) {
+    fail(`no cached graph in ${cacheDir(rootDir)}. Run: codinflow analyze ${rootDir} (or pass --refresh)`);
+  }
+  return { snapshot: cached.snapshot, changes: detectChanges(rootDir, cached.manifest) };
 }
 
 // ---------------------------------------------------------------------------
@@ -336,13 +458,7 @@ function symbolsInFiles(snapshot: GraphSnapshot, files: Set<string>): string[] {
 }
 
 function printQueryHuman(fn: string, reports: ReturnType<typeof buildReport>[], staleness: ReturnType<typeof stalenessFor>): void {
-  const banner =
-    staleness.verdict === "fresh"
-      ? `✓ graph current`
-      : staleness.verdict === "stale-affected"
-        ? `⚠ graph ${humanAge(staleness.ageSeconds)} old — files this answer depends on CHANGED: ${staleness.affectedFiles.join(", ")}. Re-run with --refresh.`
-        : `~ graph ${humanAge(staleness.ageSeconds)} old, but nothing this answer depends on changed.`;
-  console.error(`\n${banner}\n`);
+  printStaleness(staleness);
 
   if (reports.length === 0) {
     console.error(`  no function/method/class named "${fn}" in the graph.`);
@@ -357,15 +473,17 @@ function printQueryHuman(fn: string, reports: ReturnType<typeof buildReport>[], 
     console.error(`  ${s.description}`);
     if (s.filePath) console.error(`  ${s.filePath}${s.startLine ? `:${s.startLine}` : ""}`);
 
+    const callerLabel = (caller: { name: string; line?: number; guard?: string }): string =>
+      `${caller.name}${caller.line ? `:${caller.line}` : ""}${caller.guard ? ` ${c.magenta(caller.guard)}` : ""}`;
     if (report.importedBy?.length) {
       console.error(`\n  Imported by (${report.importedBy.length} file${report.importedBy.length === 1 ? "" : "s"}):`);
       for (const group of report.importedBy) {
-        console.error(`    ${group.file} — ${group.callers.map((c) => `${c.name}${c.line ? `:${c.line}` : ""}`).join(", ")}`);
+        console.error(`    ${group.file} — ${group.callers.map(callerLabel).join(", ")}`);
       }
     } else if (report.usedBy?.length) {
       console.error(`\n  Used by (${report.usedBy.length} file${report.usedBy.length === 1 ? "" : "s"}):`);
       for (const group of report.usedBy) {
-        console.error(`    ${group.file} — ${group.callers.map((c) => c.name).join(", ")}`);
+        console.error(`    ${group.file} — ${group.callers.map(callerLabel).join(", ")}`);
       }
     }
 
@@ -412,12 +530,6 @@ function analyzeGuidance(snapshot: GraphSnapshot, where: string, cached: boolean
 
 function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
-}
-
-function humanAge(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  return `${Math.round(seconds / 3600)}h`;
 }
 
 function fail(message: string): never {

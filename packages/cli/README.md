@@ -30,11 +30,12 @@ A public GitHub repository, by `owner/repo` shorthand or full URL:
 npx codinflow honojs/hono --out hono.graph.json
 ```
 
-Upload to a CodinFlow API so it shows up in the visual canvas:
+Upload to a self-hosted CodinFlow API so it shows up in a shared canvas
+(the local `--ui` needs none of this):
 
 ```bash
 npx codinflow ./my-app \
-  --api https://codinflow-api.software-93f.workers.dev \
+  --api "$CODINFLOW_API" \
   --token "$CODINFLOW_TOKEN"
 ```
 
@@ -46,8 +47,14 @@ npx codinflow ./my-app \
 | `--commit-sha <sha>` | Label this snapshot (default: current git HEAD) |
 | `--branch <name>` | Branch to clone, for a GitHub URL |
 | `--out <file>` | Write the graph JSON to this file |
-| `--api <url>` | Upload to a CodinFlow API |
+| `--api <url>` | Upload to a self-hosted CodinFlow API |
 | `--token <token>` | Bearer token for `--api` (or set `CODINFLOW_TOKEN`) |
+| `--fn <name>` | Symbol for `query` (also the first operand of `describe`/`impact`) |
+| `--file <path>` | For `impact`: a whole file instead of a symbol |
+| `--route <route>` | For `trace` (also its first operand) |
+| `--depth <n>` | Max walk depth for `impact` (12) / `trace` (8) |
+| `--json` | Machine-readable output, on every query verb |
+| `--refresh` | Re-analyze before answering — guaranteed fresh |
 
 The first argument is a local path (use `./`) or a GitHub `owner/repo` / URL. A
 leading `analyze` verb is optional: `codinflow analyze ./my-app` also works.
@@ -55,21 +62,36 @@ leading `analyze` verb is optional: `codinflow analyze ./my-app` also works.
 Cloning a remote repo runs `git clone --depth 1` and nothing else — repositories
 are parsed, never installed or built.
 
-## Query a symbol (for humans and AI agents)
+## Ask the codebase questions (for humans and AI agents)
 
-`analyze` on a local folder caches a warm graph in `.codinflow/`. `status` and
-`query` read it — and, crucially, report **how stale it is** versus the working
+`analyze` on a local folder caches a warm graph in `.codinflow/`. Every query
+verb reads it — and, crucially, reports **how stale it is** versus the working
 tree, so an answer is never silently out of date.
 
 ```bash
+codinflow map ./my-app             # orientation: routes, hotspot files, boundaries, env vars
+codinflow query --fn getRouter ./my-app   # who calls/imports it — and behind which guards
+codinflow describe createOrder ./my-app   # one symbol's full story: signature, traits,
+                                          #   callers, callees, reads/writes/throws/external
+codinflow impact getRouter ./my-app       # blast radius: transitive callers → routes,
+                                          #   importing files (type invalidation), test files
+codinflow impact --file src/db.ts ./my-app
+codinflow trace "POST /api/orders" ./my-app  # middleware order + guarded call tree
+                                             #   + db/external/env touches
 codinflow status ./my-app          # is the cached graph current?
-codinflow query --fn getRouter --output importedBy,usedBy,calls ./my-app
-codinflow query --fn getRouter --json ./my-app     # machine-readable
-codinflow query --fn getRouter --refresh ./my-app  # re-analyze first, guaranteed fresh
 ```
 
-`--output` is a comma list of: `calls`, `usedBy`, `importedBy`, `reads`,
-`writes`, `throws`, `external` (default `calls,usedBy,importedBy`).
+All of it is type-resolved, and guards are verbatim source — `impact` will tell
+you a caller only runs `if (!isValidShopifyOrder(order))`. Add `--json` to any
+verb for machine-readable output, `--refresh` to re-analyze first.
+
+For `query`, `--output` is a comma list of: `calls`, `usedBy`, `importedBy`,
+`reads`, `writes`, `throws`, `external` (default `calls,usedBy,importedBy`).
+
+AI agents: `npx codinflow skill install` writes a `.claude/skills/codinflow`
+skill that teaches Claude Code (and compatible agents) the whole flow —
+`map` to orient, `describe`/`query` while reading, `impact` before editing,
+`trace` when debugging an endpoint.
 
 ### Staleness is first-class
 

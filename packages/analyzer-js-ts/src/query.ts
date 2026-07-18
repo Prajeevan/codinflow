@@ -21,7 +21,7 @@ export interface CallOut {
 
 export interface FileGroup {
   file: string;
-  callers: Array<{ id: string; name: string; line?: number }>;
+  callers: Array<{ id: string; name: string; line?: number; guard?: string }>;
 }
 
 export interface SymbolRef {
@@ -44,6 +44,7 @@ export interface SymbolReport {
     exported: boolean;
     signature?: string;
     description: string;
+    tags: string[];
   };
   calls?: CallOut[];
   usedBy?: FileGroup[];
@@ -54,6 +55,18 @@ export interface SymbolReport {
   external?: SymbolRef[];
   /** Files this report depends on — used to decide whether drift affects it. */
   relevantFiles: string[];
+}
+
+/**
+ * Human guard text for a conditional edge. The verbatim condition is preferred
+ * over the prose label because it is copy-paste searchable in the source.
+ */
+export function guardText(edge: GraphEdge): string | undefined {
+  if (edge.metadata?.conditional !== true) return undefined;
+  if (edge.condition) {
+    return edge.metadata?.branch === "else" ? `if (!(${edge.condition}))` : `if (${edge.condition})`;
+  }
+  return edge.label;
 }
 
 export function parseOutputs(raw: string | undefined): OutputKind[] {
@@ -96,6 +109,7 @@ export function buildReport(snapshot: GraphSnapshot, node: GraphNode, outputs: O
       exported,
       signature: node.signature,
       description: node.summary ?? describe(node),
+      tags: node.tags,
     },
     relevantFiles: [],
   };
@@ -111,7 +125,7 @@ export function buildReport(snapshot: GraphSnapshot, node: GraphNode, outputs: O
           name: target.name,
           filePath: target.filePath,
           line: edge.sourceLocation?.line,
-          guard: edge.metadata?.conditional ? edge.label : undefined,
+          guard: guardText(edge),
           conditional: edge.metadata?.conditional === true,
         };
       });
@@ -184,7 +198,12 @@ function groupByFile(edges: GraphEdge[], byId: Map<string, GraphNode>): FileGrou
     const caller = byId.get(edge.sourceNodeId);
     const file = caller?.filePath ?? edge.sourceLocation?.filePath ?? "unknown";
     const list = groups.get(file) ?? [];
-    list.push({ id: caller?.id ?? edge.sourceNodeId, name: caller?.name ?? "unknown", line: edge.sourceLocation?.line });
+    list.push({
+      id: caller?.id ?? edge.sourceNodeId,
+      name: caller?.name ?? "unknown",
+      line: edge.sourceLocation?.line,
+      guard: guardText(edge),
+    });
     groups.set(file, list);
   }
   return [...groups.entries()].map(([file, callers]) => ({ file, callers }));
