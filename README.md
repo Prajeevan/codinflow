@@ -9,6 +9,13 @@ One CLI, entirely local: no install, no account, no server. Humans get the same
 graph as a visual map (`--ui`); agents get it as JSON, plus a `staleness` verdict
 on every answer.
 
+[![Add the skill](https://img.shields.io/badge/npx_skills_add-Prajeevan%2Fcodinflow-000?logo=anthropic)](https://www.skills.sh)
+&nbsp;[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+```bash
+npx skills add Prajeevan/codinflow    # teach your agent the verbs (Claude Code, Cursor, Cline, …)
+```
+
 ## grep floods, codinflow answers
 
 ```text
